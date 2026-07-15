@@ -54,7 +54,7 @@ SELECT
     COUNT(*) AS total_tables,
     SUM(CASE WHEN num_rows IS NOT NULL THEN 1 ELSE 0 END) AS with_stats,
     SUM(CASE WHEN num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
-    SUM(CASE WHEN stale = 'YES' THEN 1 ELSE 0 END) AS stale_tables,
+    SUM(CASE WHEN stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale_tables,
     TO_CHAR(MIN(last_analyzed), 'YYYY-MM-DD HH24:MI:SS') AS oldest_analyzed,
     TO_CHAR(MAX(last_analyzed), 'YYYY-MM-DD HH24:MI:SS') AS newest_analyzed
 FROM

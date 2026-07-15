@@ -117,15 +117,19 @@ PROMPT =========================================================================
 COLUMN task_name          FORMAT A35        HEADING "Task Name"
 COLUMN window_start       FORMAT A19        HEADING "Window Start"
 COLUMN window_end         FORMAT A19        HEADING "Window End"
-COLUMN job_status         FORMAT A12        HEADING "Status"
-COLUMN job_duration_mins  FORMAT 9999.9     HEADING "Mins"
+COLUMN jobs_created       FORMAT 9999       HEADING "Created"
+COLUMN jobs_started       FORMAT 9999       HEADING "Started"
+COLUMN jobs_completed     FORMAT 9999       HEADING "Done"
+COLUMN window_duration_mins FORMAT 9999.9   HEADING "Mins"
 
 SELECT
     h.client_name AS task_name,
     TO_CHAR(h.window_start_time, 'YYYY-MM-DD HH24:MI:SS') AS window_start,
     TO_CHAR(h.window_end_time, 'YYYY-MM-DD HH24:MI:SS') AS window_end,
-    h.job_status,
-    ROUND((CAST(h.window_end_time AS DATE) - CAST(h.window_start_time AS DATE)) * 24 * 60, 1) AS job_duration_mins
+    h.jobs_created,
+    h.jobs_started,
+    h.jobs_completed,
+    ROUND((CAST(h.window_end_time AS DATE) - CAST(h.window_start_time AS DATE)) * 24 * 60, 1) AS window_duration_mins
 FROM
     dba_autotask_client_history h
 WHERE
@@ -231,8 +235,8 @@ ORDER BY
 PROMPT
 PROMPT Notes:
 PROMPT   - Auto stats runs during maintenance windows (typically nights/weekends)
-PROMPT   - Job status SUCCEEDED means window completed normally
-PROMPT   - Job status STOPPED means window was manually stopped or ran out of time
+PROMPT   - Jobs Created vs Done shows whether the window finished its workload
+PROMPT   - Scheduler job status STOPPED means the run was stopped or timed out
 PROMPT   - Consider extending window duration if jobs frequently time out
 PROMPT   - Use DBMS_AUTO_TASK_ADMIN to enable/disable auto stats
 PROMPT

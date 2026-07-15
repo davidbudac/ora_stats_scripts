@@ -43,7 +43,7 @@ SELECT
     ts.table_name,
     ts.num_rows,
     TO_CHAR(ts.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS last_analyzed,
-    ts.stale,
+    ts.stale_stats AS stale,
     NVL(tm.inserts, 0) AS inserts,
     NVL(tm.updates, 0) AS updates,
     NVL(tm.deletes, 0) AS deletes,
@@ -59,7 +59,7 @@ SELECT
         WHEN ts.num_rows IS NULL THEN 'HIGH'
         WHEN ts.num_rows > 0 AND
              (NVL(tm.inserts, 0) + NVL(tm.updates, 0) + NVL(tm.deletes, 0)) / ts.num_rows > 0.5 THEN 'HIGH'
-        WHEN ts.stale = 'YES' THEN 'MEDIUM'
+        WHEN ts.stale_stats = 'YES' THEN 'MEDIUM'
         ELSE 'LOW'
     END AS priority
 FROM
@@ -72,7 +72,7 @@ WHERE
     ts.owner = UPPER('&schema_name')
     AND ts.object_type = 'TABLE'
     AND ts.partition_name IS NULL
-    AND (ts.stale = 'YES'
+    AND (ts.stale_stats = 'YES'
          OR ts.num_rows IS NULL
          OR NVL(tm.truncated, 'NO') = 'YES')
 ORDER BY
@@ -102,7 +102,7 @@ SELECT
             ROUND((NVL(tm.inserts, 0) + NVL(tm.updates, 0) + NVL(tm.deletes, 0)) / ts.num_rows * 100, 1)
         ELSE NULL
     END AS pct_modified,
-    ts.stale,
+    ts.stale_stats AS stale,
     TRUNC(SYSDATE - ts.last_analyzed) AS days_old
 FROM
     dba_tab_statistics ts
@@ -170,7 +170,7 @@ COLUMN high_churn    FORMAT 9999 HEADING "High Churn"
 
 SELECT
     COUNT(*) AS total_tables,
-    SUM(CASE WHEN ts.stale = 'YES' THEN 1 ELSE 0 END) AS stale_tables,
+    SUM(CASE WHEN ts.stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale_tables,
     SUM(CASE WHEN ts.num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
     SUM(CASE WHEN NVL(tm.truncated, 'NO') = 'YES' THEN 1 ELSE 0 END) AS truncated,
     SUM(CASE

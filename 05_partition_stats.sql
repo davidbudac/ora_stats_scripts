@@ -49,7 +49,7 @@ SELECT
     t.partition_count AS part_cnt,
     ts.num_rows AS global_rows,
     TO_CHAR(ts.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS global_analyzed,
-    ts.stale AS global_stale,
+    ts.stale_stats AS global_stale,
     NVL((SELECT preference_value
          FROM dba_tab_stat_prefs
          WHERE owner = t.owner
@@ -79,11 +79,11 @@ SELECT
     ps.num_rows,
     tp.blocks,
     TO_CHAR(ps.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS last_analyzed,
-    ps.stale,
+    ps.stale_stats AS stale,
     TRUNC(SYSDATE - ps.last_analyzed) AS days_old,
     CASE
         WHEN ps.num_rows IS NULL THEN 'NO STATS'
-        WHEN ps.stale = 'YES' THEN 'STALE'
+        WHEN ps.stale_stats = 'YES' THEN 'STALE'
         WHEN TRUNC(SYSDATE - ps.last_analyzed) > 30 THEN 'OLD'
         ELSE NULL
     END AS issues
@@ -115,7 +115,7 @@ SELECT
     ps.table_name,
     COUNT(*) AS total_partitions,
     SUM(CASE WHEN ps.num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
-    SUM(CASE WHEN ps.stale = 'YES' THEN 1 ELSE 0 END) AS stale,
+    SUM(CASE WHEN ps.stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale,
     SUM(CASE WHEN ps.last_analyzed < SYSDATE - 30 AND ps.num_rows IS NOT NULL THEN 1 ELSE 0 END) AS old_stats
 FROM
     dba_tab_statistics ps
@@ -127,7 +127,7 @@ GROUP BY
     ps.table_name
 HAVING
     SUM(CASE WHEN ps.num_rows IS NULL THEN 1 ELSE 0 END) > 0
-    OR SUM(CASE WHEN ps.stale = 'YES' THEN 1 ELSE 0 END) > 0
+    OR SUM(CASE WHEN ps.stale_stats = 'YES' THEN 1 ELSE 0 END) > 0
 ORDER BY
     stale DESC,
     no_stats DESC;
@@ -147,7 +147,7 @@ SELECT
     ps.partition_name,
     TO_CHAR(ps.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS part_analyzed,
     ROUND(SYSDATE - ps.last_analyzed, 1) AS days_ago,
-    ps.stale
+    ps.stale_stats AS stale
 FROM
     dba_tab_statistics ps
     JOIN dba_part_tables pt

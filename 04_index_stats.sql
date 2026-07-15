@@ -52,10 +52,10 @@ SELECT
         ELSE NULL
     END AS cf_ratio,
     TO_CHAR(ist.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS last_analyzed,
-    ist.stale,
+    ist.stale_stats AS stale,
     CASE
         WHEN ist.num_rows IS NULL THEN 'NO STATS'
-        WHEN ist.stale = 'YES' THEN 'STALE'
+        WHEN ist.stale_stats = 'YES' THEN 'STALE'
         WHEN t.blocks > 0 AND ist.clustering_factor / t.blocks > 10
              AND i.uniqueness = 'NONUNIQUE'
              AND i.index_type NOT LIKE 'BITMAP%' THEN 'HIGH CF'
@@ -77,7 +77,7 @@ WHERE
 ORDER BY
     CASE
         WHEN ist.num_rows IS NULL THEN 1
-        WHEN ist.stale = 'YES' THEN 2
+        WHEN ist.stale_stats = 'YES' THEN 2
         ELSE 3
     END,
     i.table_name,
@@ -143,7 +143,7 @@ SELECT
     i.index_type,
     COUNT(*) AS index_count,
     SUM(CASE WHEN ist.num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
-    SUM(CASE WHEN ist.stale = 'YES' THEN 1 ELSE 0 END) AS stale
+    SUM(CASE WHEN ist.stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale
 FROM
     dba_indexes i
     LEFT JOIN dba_ind_statistics ist

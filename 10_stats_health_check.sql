@@ -59,7 +59,7 @@ SELECT
 FROM dba_tab_statistics
 WHERE owner = UPPER('&schema_name')
 AND object_type = 'TABLE' AND partition_name IS NULL
-AND stale = 'YES'
+AND stale_stats = 'YES'
 UNION ALL
 SELECT
     'Tables with Locked Statistics',
@@ -191,7 +191,7 @@ SELECT
 FROM dba_tab_statistics
 WHERE owner = UPPER('&schema_name')
 AND object_type = 'PARTITION'
-AND stale = 'YES';
+AND stale_stats = 'YES';
 
 PROMPT
 PROMPT ============================================================================
@@ -330,7 +330,7 @@ BEGIN
     FROM dba_tab_statistics
     WHERE owner = UPPER('&schema_name')
     AND object_type = 'TABLE' AND partition_name IS NULL
-    AND stale = 'YES';
+    AND stale_stats = 'YES';
 
     IF v_count > 0 THEN
         DBMS_OUTPUT.PUT_LINE('[MEDIUM] ' || v_count || ' tables have stale statistics.');

@@ -63,6 +63,7 @@ Most scripts prompt for a schema name (and optionally a table name pattern). Use
 ## Conventions
 
 - All scripts use the same issue flags: `NO STATS`, `STALE`, `OLD (>30d)`, `LOW SAMPLE`
+- Staleness comes from the `STALE_STATS` column of `DBA_TAB_STATISTICS`/`DBA_IND_STATISTICS` (there is no `STALE` column); select it as `stale_stats AS stale` for display
 - Column formats are standardized in `common_settings.sql`; per-query `COLUMN` commands must appear BEFORE the query they format (SQL*Plus applies them to subsequent statements only)
 - Scripts output a legend/notes section at the end explaining flags and recommendations
 - Raw `LOW_VALUE`/`HIGH_VALUE` are decoded via `DBMS_STATS.CONVERT_RAW_VALUE` in a `WITH FUNCTION` clause (12c+)

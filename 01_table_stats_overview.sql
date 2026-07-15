@@ -47,12 +47,12 @@ SELECT
         ELSE NULL
     END AS sample_pct,
     TO_CHAR(ts.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS last_analyzed,
-    ts.stale,
+    ts.stale_stats AS stale,
     ts.stattype_locked,
     TRUNC(SYSDATE - ts.last_analyzed) AS days_old,
     CASE
         WHEN ts.num_rows IS NULL THEN 'NO STATS'
-        WHEN ts.stale = 'YES' THEN 'STALE'
+        WHEN ts.stale_stats = 'YES' THEN 'STALE'
         WHEN TRUNC(SYSDATE - ts.last_analyzed) > 30 THEN 'OLD (>30d)'
         WHEN ts.sample_size IS NOT NULL
              AND ts.num_rows > 0
@@ -69,11 +69,16 @@ WHERE
     t.owner = UPPER('&schema_name')
     AND t.temporary = 'N'
     AND t.secondary = 'N'
+    AND t.nested = 'NO'
     AND (t.iot_type IS NULL OR t.iot_type = 'IOT')
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    )
 ORDER BY
     CASE
         WHEN ts.num_rows IS NULL THEN 1
-        WHEN ts.stale = 'YES' THEN 2
+        WHEN ts.stale_stats = 'YES' THEN 2
         WHEN TRUNC(SYSDATE - ts.last_analyzed) > 30 THEN 3
         ELSE 4
     END,
@@ -84,10 +89,17 @@ PROMPT =========================================================================
 PROMPT  SUMMARY
 PROMPT ============================================================================
 
+COLUMN total_tables  FORMAT 9999 HEADING "Total|Tables"
+COLUMN no_stats      FORMAT 9999 HEADING "No|Stats"
+COLUMN stale_stats   FORMAT 9999 HEADING "Stale|Stats"
+COLUMN old_stats     FORMAT 9999 HEADING "Old|Stats"
+COLUMN low_sample    FORMAT 9999 HEADING "Low|Sample"
+COLUMN locked_stats  FORMAT 9999 HEADING "Locked|Stats"
+
 SELECT
     COUNT(*) AS total_tables,
     SUM(CASE WHEN ts.num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
-    SUM(CASE WHEN ts.stale = 'YES' THEN 1 ELSE 0 END) AS stale_stats,
+    SUM(CASE WHEN ts.stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale_stats,
     SUM(CASE WHEN ts.last_analyzed < SYSDATE - 30 AND ts.num_rows IS NOT NULL THEN 1 ELSE 0 END) AS old_stats,
     SUM(CASE WHEN ts.sample_size IS NOT NULL AND ts.num_rows > 0
              AND ts.sample_size / ts.num_rows < 0.1 THEN 1 ELSE 0 END) AS low_sample,
@@ -102,14 +114,12 @@ WHERE
     t.owner = UPPER('&schema_name')
     AND t.temporary = 'N'
     AND t.secondary = 'N'
-    AND (t.iot_type IS NULL OR t.iot_type = 'IOT');
-
-COLUMN total_tables  FORMAT 9999 HEADING "Total|Tables"
-COLUMN no_stats      FORMAT 9999 HEADING "No|Stats"
-COLUMN stale_stats   FORMAT 9999 HEADING "Stale|Stats"
-COLUMN old_stats     FORMAT 9999 HEADING "Old|Stats"
-COLUMN low_sample    FORMAT 9999 HEADING "Low|Sample"
-COLUMN locked_stats  FORMAT 9999 HEADING "Locked|Stats"
+    AND t.nested = 'NO'
+    AND (t.iot_type IS NULL OR t.iot_type = 'IOT')
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    );
 
 PROMPT
 PROMPT Issue Legend:
@@ -118,6 +128,10 @@ PROMPT   STALE      - Statistics marked as stale by Oracle
 PROMPT   OLD (>30d) - Statistics older than 30 days
 PROMPT   LOW SAMPLE - Sample size less than 10% of rows
 PROMPT
+PROMPT Note: Temporary, secondary, nested, and external tables are excluded.
+PROMPT
+
+UNDEFINE schema_name
 
 SET FEEDBACK ON
 SET VERIFY ON

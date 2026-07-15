@@ -40,6 +40,15 @@ Most scripts prompt for a schema name (and optionally a table name pattern). Use
 **Health Check (10):**
 - `10_stats_health_check.sql` - Comprehensive health check with PL/SQL recommendations block
 
+**History / Pending / System (11-14):**
+- `11_stats_history.sql` - Stats history retention, SYSAUX usage, restore points (DBA_TAB_STATS_HISTORY)
+- `12_pending_stats.sql` - Pending stats from PUBLISH=FALSE gathers (DBA_TAB_PENDING_STATS)
+- `13_dictionary_system_stats.sql` - Dictionary/fixed-object stats freshness, system stats (SYS.AUX_STATS$)
+- `14_realtime_hf_stats.sql` - Real-time stats and high-frequency auto task (19c+ only)
+
+**Batch driver:**
+- `run_all.sh` - Runs all scripts for one schema, feeding prompt answers via stdin, into a combined report file. Used by the CI smoke test (`.github/workflows/smoke-test.yml`) against a `gvenzl/oracle-free` container.
+
 ## Key Data Dictionary Views Used
 
 - `DBA_TAB_STATISTICS` / `DBA_IND_STATISTICS` - Stats with staleness flags
@@ -54,6 +63,10 @@ Most scripts prompt for a schema name (and optionally a table name pattern). Use
 ## Conventions
 
 - All scripts use the same issue flags: `NO STATS`, `STALE`, `OLD (>30d)`, `LOW SAMPLE`
-- Column formats are standardized in `common_settings.sql`
+- Staleness comes from the `STALE_STATS` column of `DBA_TAB_STATISTICS`/`DBA_IND_STATISTICS` (there is no `STALE` column); select it as `stale_stats AS stale` for display
+- Column formats are standardized in `common_settings.sql`; per-query `COLUMN` commands must appear BEFORE the query they format (SQL*Plus applies them to subsequent statements only)
 - Scripts output a legend/notes section at the end explaining flags and recommendations
-- Raw `LOW_VALUE`/`HIGH_VALUE` are decoded using `UTL_RAW.CAST_TO_*` functions for readability
+- Raw `LOW_VALUE`/`HIGH_VALUE` are decoded via `DBMS_STATS.CONVERT_RAW_VALUE` in a `WITH FUNCTION` clause (12c+)
+- Table-level reports consistently exclude temporary, secondary, nested, and external tables
+- `DBA_OPTSTAT_OPERATIONS` and autotask history times are `TIMESTAMP WITH TIME ZONE` - compute durations via `CAST(... AS DATE)` arithmetic, never raw timestamp subtraction (yields INTERVAL, breaks ROUND/AVG)
+- Each script ends with `UNDEFINE` of its substitution variables and restores `FEEDBACK`/`VERIFY`

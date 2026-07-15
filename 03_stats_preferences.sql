@@ -195,6 +195,8 @@ PROMPT =========================================================================
 PROMPT  TABLES WITH LOCKED STATISTICS
 PROMPT ============================================================================
 
+COLUMN lock_type FORMAT A10 HEADING "Lock Type"
+
 SELECT
     table_name,
     stattype_locked AS lock_type
@@ -207,8 +209,6 @@ WHERE
 ORDER BY
     table_name;
 
-COLUMN lock_type FORMAT A10 HEADING "Lock Type"
-
 PROMPT
 PROMPT Notes:
 PROMPT   - Non-default global preferences are highlighted with is_default='No'
@@ -217,6 +217,8 @@ PROMPT   - AUTO_STAT_EXTENSIONS=ON enables automatic extended statistics
 PROMPT   - CONCURRENT=TRUE can speed up stats gathering on large schemas
 PROMPT   - Locked statistics will not be updated by DBMS_STATS.GATHER_*
 PROMPT
+
+UNDEFINE schema_name
 
 SET FEEDBACK ON
 SET VERIFY ON

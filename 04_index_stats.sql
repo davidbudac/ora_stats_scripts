@@ -17,7 +17,7 @@ PROMPT =========================================================================
 PROMPT
 
 ACCEPT schema_name CHAR PROMPT 'Enter schema name: '
-ACCEPT table_name CHAR PROMPT 'Enter table name (or % for all): '
+ACCEPT table_name CHAR DEFAULT '%' PROMPT 'Enter table name [%]: '
 
 COLUMN table_name         FORMAT A25        HEADING "Table"
 COLUMN index_name         FORMAT A25        HEADING "Index"
@@ -52,12 +52,13 @@ SELECT
         ELSE NULL
     END AS cf_ratio,
     TO_CHAR(ist.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS last_analyzed,
-    ist.stale,
+    ist.stale_stats AS stale,
     CASE
         WHEN ist.num_rows IS NULL THEN 'NO STATS'
-        WHEN ist.stale = 'YES' THEN 'STALE'
+        WHEN ist.stale_stats = 'YES' THEN 'STALE'
         WHEN t.blocks > 0 AND ist.clustering_factor / t.blocks > 10
-             AND i.uniqueness = 'NONUNIQUE' THEN 'HIGH CF'
+             AND i.uniqueness = 'NONUNIQUE'
+             AND i.index_type NOT LIKE 'BITMAP%' THEN 'HIGH CF'
         ELSE NULL
     END AS issues
 FROM
@@ -76,7 +77,7 @@ WHERE
 ORDER BY
     CASE
         WHEN ist.num_rows IS NULL THEN 1
-        WHEN ist.stale = 'YES' THEN 2
+        WHEN ist.stale_stats = 'YES' THEN 2
         ELSE 3
     END,
     i.table_name,
@@ -89,6 +90,10 @@ PROMPT =========================================================================
 PROMPT
 PROMPT Indexes with poor clustering factor (CF Ratio > 5):
 PROMPT (CF Ratio = Clustering Factor / Table Blocks - lower is better)
+PROMPT (Bitmap indexes are excluded: clustering factor is not meaningful for them)
+
+COLUMN table_blocks   FORMAT 999,999,999 HEADING "Table Blks"
+COLUMN cf_quality     FORMAT A10         HEADING "CF Quality"
 
 SELECT
     i.table_name,
@@ -98,10 +103,12 @@ SELECT
     ROUND(ist.clustering_factor / NULLIF(t.blocks, 0), 2) AS cf_ratio,
     ist.num_rows AS index_rows,
     CASE
+        WHEN ist.clustering_factor IS NULL THEN 'UNKNOWN'
         WHEN ist.clustering_factor <= t.blocks THEN 'EXCELLENT'
         WHEN ist.clustering_factor <= t.blocks * 2 THEN 'GOOD'
         WHEN ist.clustering_factor <= t.blocks * 5 THEN 'FAIR'
-        WHEN ist.clustering_factor <= ist.num_rows THEN 'POOR'
+        WHEN ist.num_rows IS NOT NULL
+             AND ist.clustering_factor <= ist.num_rows THEN 'POOR'
         ELSE 'VERY POOR'
     END AS cf_quality
 FROM
@@ -117,24 +124,26 @@ WHERE
     i.owner = UPPER('&schema_name')
     AND i.table_name LIKE UPPER('&table_name')
     AND i.index_type NOT IN ('LOB')
+    AND i.index_type NOT LIKE 'BITMAP%'
     AND t.blocks > 0
     AND ist.clustering_factor / t.blocks > 5
 ORDER BY
     cf_ratio DESC NULLS LAST;
-
-COLUMN table_blocks   FORMAT 999,999,999 HEADING "Table Blks"
-COLUMN cf_quality     FORMAT A10         HEADING "CF Quality"
 
 PROMPT
 PROMPT ============================================================================
 PROMPT  SUMMARY BY INDEX TYPE
 PROMPT ============================================================================
 
+COLUMN index_count FORMAT 9999 HEADING "Count"
+COLUMN no_stats    FORMAT 9999 HEADING "No Stats"
+COLUMN stale       FORMAT 9999 HEADING "Stale"
+
 SELECT
     i.index_type,
     COUNT(*) AS index_count,
     SUM(CASE WHEN ist.num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
-    SUM(CASE WHEN ist.stale = 'YES' THEN 1 ELSE 0 END) AS stale
+    SUM(CASE WHEN ist.stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale
 FROM
     dba_indexes i
     LEFT JOIN dba_ind_statistics ist
@@ -150,10 +159,6 @@ GROUP BY
 ORDER BY
     index_count DESC;
 
-COLUMN index_count FORMAT 9999 HEADING "Count"
-COLUMN no_stats    FORMAT 9999 HEADING "No Stats"
-COLUMN stale       FORMAT 9999 HEADING "Stale"
-
 PROMPT
 PROMPT Clustering Factor Notes:
 PROMPT   - CF close to # of blocks = data well ordered by index key (EXCELLENT)
@@ -164,8 +169,11 @@ PROMPT
 PROMPT Issue Legend:
 PROMPT   NO STATS - Index has no optimizer statistics
 PROMPT   STALE    - Statistics marked as stale
-PROMPT   HIGH CF  - Clustering factor > 10x table blocks
+PROMPT   HIGH CF  - Clustering factor > 10x table blocks (non-bitmap indexes only)
 PROMPT
+
+UNDEFINE schema_name
+UNDEFINE table_name
 
 SET FEEDBACK ON
 SET VERIFY ON

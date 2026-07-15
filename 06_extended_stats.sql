@@ -56,9 +56,12 @@ PROMPT =========================================================================
 PROMPT  EXTENDED STATISTICS SUMMARY BY TYPE
 PROMPT ============================================================================
 
+COLUMN extension_type FORMAT A15 HEADING "Type"
+COLUMN count          FORMAT 9999 HEADING "Count"
+
 SELECT
     CASE
-        WHEN se.extension LIKE '(%' AND se.extension NOT LIKE '%(%' THEN 'COLUMN GROUP'
+        WHEN se.extension NOT LIKE '%(%(%' THEN 'COLUMN GROUP'
         ELSE 'EXPRESSION'
     END AS extension_type,
     se.creator,
@@ -69,7 +72,7 @@ WHERE
     se.owner = UPPER('&schema_name')
 GROUP BY
     CASE
-        WHEN se.extension LIKE '(%' AND se.extension NOT LIKE '%(%' THEN 'COLUMN GROUP'
+        WHEN se.extension NOT LIKE '%(%(%' THEN 'COLUMN GROUP'
         ELSE 'EXPRESSION'
     END,
     se.creator
@@ -77,15 +80,20 @@ ORDER BY
     extension_type,
     creator;
 
-COLUMN extension_type FORMAT A15 HEADING "Type"
-COLUMN count          FORMAT 9999 HEADING "Count"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  SQL PLAN DIRECTIVES SUGGESTING COLUMN GROUPS
 PROMPT ============================================================================
 PROMPT
 PROMPT Directives with DYNAMIC_SAMPLING or DYNAMIC_SAMPLING_RESULT:
+
+COLUMN directive_id   FORMAT 99999999999999999999 HEADING "Directive ID"
+COLUMN columns        FORMAT A40        HEADING "Columns"
+COLUMN directive_type FORMAT A25        HEADING "Directive Type"
+COLUMN state          FORMAT A12        HEADING "State"
+COLUMN reason         FORMAT A30        HEADING "Reason"
+COLUMN created        FORMAT A10        HEADING "Created"
+COLUMN last_used      FORMAT A10        HEADING "Last Used"
 
 SELECT
     d.directive_id,
@@ -117,18 +125,13 @@ ORDER BY
     d.last_used DESC NULLS LAST,
     o.object_name;
 
-COLUMN directive_id   FORMAT 99999999999999999999 HEADING "Directive ID"
-COLUMN columns        FORMAT A40        HEADING "Columns"
-COLUMN directive_type FORMAT A25        HEADING "Directive Type"
-COLUMN state          FORMAT A12        HEADING "State"
-COLUMN reason         FORMAT A30        HEADING "Reason"
-COLUMN created        FORMAT A10        HEADING "Created"
-COLUMN last_used      FORMAT A10        HEADING "Last Used"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  RECOMMENDED COLUMN GROUPS (from Directives not yet implemented)
 PROMPT ============================================================================
+
+COLUMN suggested_columns FORMAT A40 HEADING "Suggested Columns"
+COLUMN create_command    FORMAT A80 HEADING "Create Command"
 
 SELECT
     o.object_name AS table_name,
@@ -151,7 +154,7 @@ WHERE
         FROM dba_stat_extensions se
         WHERE se.owner = o.owner
         AND se.table_name = o.object_name
-        AND se.extension LIKE '%' || o.subobject_name || '%'
+        AND se.extension LIKE '%"' || o.subobject_name || '"%'
     )
 GROUP BY
     d.directive_id,
@@ -160,13 +163,14 @@ GROUP BY
 ORDER BY
     o.object_name;
 
-COLUMN suggested_columns FORMAT A40 HEADING "Suggested Columns"
-COLUMN create_command    FORMAT A80 HEADING "Create Command"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  AUTO_STAT_EXTENSIONS PREFERENCE STATUS
 PROMPT ============================================================================
+
+COLUMN scope       FORMAT A30 HEADING "Scope"
+COLUMN value       FORMAT A10 HEADING "Value"
+COLUMN description FORMAT A55 HEADING "Description"
 
 SELECT
     'Global AUTO_STAT_EXTENSIONS' AS scope,
@@ -178,10 +182,6 @@ SELECT
     END AS description
 FROM dual;
 
-COLUMN scope       FORMAT A30 HEADING "Scope"
-COLUMN value       FORMAT A10 HEADING "Value"
-COLUMN description FORMAT A55 HEADING "Description"
-
 PROMPT
 PROMPT Notes:
 PROMPT   - Column groups help optimizer with correlated column predicates
@@ -190,6 +190,8 @@ PROMPT   - AUTO_STAT_EXTENSIONS=ON automates column group creation
 PROMPT   - Expression stats support virtual column statistics
 PROMPT   - CREATOR types: USER (manual), AUTO (automatic), SYSTEM (internal)
 PROMPT
+
+UNDEFINE schema_name
 
 SET FEEDBACK ON
 SET VERIFY ON

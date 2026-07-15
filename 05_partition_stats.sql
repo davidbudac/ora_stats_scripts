@@ -17,7 +17,7 @@ PROMPT =========================================================================
 PROMPT
 
 ACCEPT schema_name CHAR PROMPT 'Enter schema name: '
-ACCEPT table_name CHAR PROMPT 'Enter table name (or % for all): '
+ACCEPT table_name CHAR DEFAULT '%' PROMPT 'Enter table name [%]: '
 
 COLUMN table_name         FORMAT A25        HEADING "Table"
 COLUMN partition_name     FORMAT A25        HEADING "Partition"
@@ -34,6 +34,14 @@ PROMPT =========================================================================
 PROMPT  PARTITIONED TABLES SUMMARY
 PROMPT ============================================================================
 
+COLUMN part_type      FORMAT A10  HEADING "Part Type"
+COLUMN subpart_type   FORMAT A10  HEADING "SubPart"
+COLUMN part_cnt       FORMAT 9999 HEADING "Parts"
+COLUMN global_rows    FORMAT 999,999,999,999 HEADING "Global Rows"
+COLUMN global_analyzed FORMAT A19 HEADING "Global Analyzed"
+COLUMN global_stale   FORMAT A5   HEADING "Stale"
+COLUMN incremental    FORMAT A6   HEADING "Incr"
+
 SELECT
     t.table_name,
     t.partitioning_type AS part_type,
@@ -41,7 +49,7 @@ SELECT
     t.partition_count AS part_cnt,
     ts.num_rows AS global_rows,
     TO_CHAR(ts.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS global_analyzed,
-    ts.stale AS global_stale,
+    ts.stale_stats AS global_stale,
     NVL((SELECT preference_value
          FROM dba_tab_stat_prefs
          WHERE owner = t.owner
@@ -59,14 +67,6 @@ WHERE
 ORDER BY
     t.table_name;
 
-COLUMN part_type      FORMAT A10  HEADING "Part Type"
-COLUMN subpart_type   FORMAT A10  HEADING "SubPart"
-COLUMN part_cnt       FORMAT 9999 HEADING "Parts"
-COLUMN global_rows    FORMAT 999,999,999,999 HEADING "Global Rows"
-COLUMN global_analyzed FORMAT A19 HEADING "Global Analyzed"
-COLUMN global_stale   FORMAT A5   HEADING "Stale"
-COLUMN incremental    FORMAT A6   HEADING "Incr"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  PARTITION-LEVEL STATISTICS
@@ -79,11 +79,11 @@ SELECT
     ps.num_rows,
     tp.blocks,
     TO_CHAR(ps.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS last_analyzed,
-    ps.stale,
+    ps.stale_stats AS stale,
     TRUNC(SYSDATE - ps.last_analyzed) AS days_old,
     CASE
         WHEN ps.num_rows IS NULL THEN 'NO STATS'
-        WHEN ps.stale = 'YES' THEN 'STALE'
+        WHEN ps.stale_stats = 'YES' THEN 'STALE'
         WHEN TRUNC(SYSDATE - ps.last_analyzed) > 30 THEN 'OLD'
         ELSE NULL
     END AS issues
@@ -106,11 +106,16 @@ PROMPT =========================================================================
 PROMPT  STALE PARTITIONS SUMMARY
 PROMPT ============================================================================
 
+COLUMN total_partitions FORMAT 9999 HEADING "Total"
+COLUMN no_stats         FORMAT 9999 HEADING "No Stats"
+COLUMN stale            FORMAT 9999 HEADING "Stale"
+COLUMN old_stats        FORMAT 9999 HEADING "Old"
+
 SELECT
     ps.table_name,
     COUNT(*) AS total_partitions,
     SUM(CASE WHEN ps.num_rows IS NULL THEN 1 ELSE 0 END) AS no_stats,
-    SUM(CASE WHEN ps.stale = 'YES' THEN 1 ELSE 0 END) AS stale,
+    SUM(CASE WHEN ps.stale_stats = 'YES' THEN 1 ELSE 0 END) AS stale,
     SUM(CASE WHEN ps.last_analyzed < SYSDATE - 30 AND ps.num_rows IS NOT NULL THEN 1 ELSE 0 END) AS old_stats
 FROM
     dba_tab_statistics ps
@@ -122,49 +127,47 @@ GROUP BY
     ps.table_name
 HAVING
     SUM(CASE WHEN ps.num_rows IS NULL THEN 1 ELSE 0 END) > 0
-    OR SUM(CASE WHEN ps.stale = 'YES' THEN 1 ELSE 0 END) > 0
+    OR SUM(CASE WHEN ps.stale_stats = 'YES' THEN 1 ELSE 0 END) > 0
 ORDER BY
     stale DESC,
     no_stats DESC;
 
-COLUMN total_partitions FORMAT 9999 HEADING "Total"
-COLUMN no_stats         FORMAT 9999 HEADING "No Stats"
-COLUMN stale            FORMAT 9999 HEADING "Stale"
-COLUMN old_stats        FORMAT 9999 HEADING "Old"
-
 PROMPT
 PROMPT ============================================================================
-PROMPT  INCREMENTAL STATISTICS SYNOPSIS STATUS
+PROMPT  INCREMENTAL STATISTICS - PARTITION FRESHNESS
 PROMPT ============================================================================
+PROMPT
+PROMPT Partition stats freshness for tables with INCREMENTAL=TRUE:
+
+COLUMN part_analyzed FORMAT A19 HEADING "Part Analyzed"
+COLUMN days_ago      FORMAT 990.9 HEADING "Days Ago"
 
 SELECT
-    sy.table_name,
-    sy.partition_name,
-    TO_CHAR(sy.analyzetime, 'YYYY-MM-DD HH24:MI:SS') AS synopsis_time,
-    ROUND((SYSDATE - sy.analyzetime), 1) AS days_ago
+    ps.table_name,
+    ps.partition_name,
+    TO_CHAR(ps.last_analyzed, 'YYYY-MM-DD HH24:MI:SS') AS part_analyzed,
+    ROUND(SYSDATE - ps.last_analyzed, 1) AS days_ago,
+    ps.stale_stats AS stale
 FROM
-    dba_tab_statistics sy
+    dba_tab_statistics ps
     JOIN dba_part_tables pt
-        ON sy.owner = pt.owner
-        AND sy.table_name = pt.table_name
+        ON ps.owner = pt.owner
+        AND ps.table_name = pt.table_name
 WHERE
-    sy.owner = UPPER('&schema_name')
-    AND sy.table_name LIKE UPPER('&table_name')
-    AND sy.object_type = 'PARTITION'
+    ps.owner = UPPER('&schema_name')
+    AND ps.table_name LIKE UPPER('&table_name')
+    AND ps.object_type = 'PARTITION'
     AND EXISTS (
         SELECT 1
         FROM dba_tab_stat_prefs p
-        WHERE p.owner = sy.owner
-        AND p.table_name = sy.table_name
+        WHERE p.owner = ps.owner
+        AND p.table_name = ps.table_name
         AND p.preference_name = 'INCREMENTAL'
         AND p.preference_value = 'TRUE'
     )
 ORDER BY
-    sy.table_name,
-    sy.partition_name;
-
-COLUMN synopsis_time FORMAT A19 HEADING "Synopsis Time"
-COLUMN days_ago      FORMAT 990.9 HEADING "Days Ago"
+    ps.table_name,
+    ps.partition_name;
 
 PROMPT
 PROMPT ============================================================================
@@ -172,6 +175,10 @@ PROMPT  GLOBAL vs PARTITION STATISTICS CONSISTENCY
 PROMPT ============================================================================
 PROMPT
 PROMPT Tables where global stats are older than newest partition stats:
+
+COLUMN global_analyzed       FORMAT A19 HEADING "Global Analyzed"
+COLUMN newest_part_analyzed  FORMAT A19 HEADING "Newest Part Analyzed"
+COLUMN drift_days            FORMAT 990.9 HEADING "Drift Days"
 
 SELECT
     gs.table_name,
@@ -197,10 +204,6 @@ HAVING
 ORDER BY
     drift_days DESC;
 
-COLUMN global_analyzed       FORMAT A19 HEADING "Global Analyzed"
-COLUMN newest_part_analyzed  FORMAT A19 HEADING "Newest Part Analyzed"
-COLUMN drift_days            FORMAT 990.9 HEADING "Drift Days"
-
 PROMPT
 PROMPT Notes:
 PROMPT   - INCREMENTAL=TRUE allows gathering only changed partition stats
@@ -208,6 +211,9 @@ PROMPT   - Global stats are derived from partition synopses with incremental
 PROMPT   - Without incremental, full table scan needed for global stats
 PROMPT   - Drift between global and partition stats can cause suboptimal plans
 PROMPT
+
+UNDEFINE schema_name
+UNDEFINE table_name
 
 SET FEEDBACK ON
 SET VERIFY ON

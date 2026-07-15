@@ -1,0 +1,58 @@
+name: smoke-test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  sqlplus-smoke:
+    name: Run all scripts against Oracle Free
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Oracle Free container
+        run: |
+          chmod 777 .
+          docker run -d --name oracle \
+            -e ORACLE_PASSWORD=oracle \
+            -v "$PWD:/scripts" \
+            gvenzl/oracle-free:slim
+
+      - name: Wait for database to become healthy
+        run: |
+          for i in $(seq 1 90); do
+            if docker exec oracle healthcheck.sh >/dev/null 2>&1; then
+              echo "Database is up after ~$((i * 5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Database did not become healthy in time" >&2
+          docker logs oracle | tail -50
+          exit 1
+
+      - name: Run all toolkit scripts against SYSTEM schema
+        run: |
+          docker exec -w /scripts oracle \
+            bash run_all.sh "sys/oracle@//localhost/FREEPDB1 as sysdba" SYSTEM % 7
+
+      - name: Check report for ORA-/SP2- errors
+        run: |
+          REPORT=$(docker exec -w /scripts oracle bash -c 'ls -t stats_report_*.txt | head -1')
+          docker exec -w /scripts oracle cat "$REPORT" > report.txt
+          echo "Report is $(wc -l < report.txt) lines"
+          if grep -En 'ORA-[0-9]+|SP2-[0-9]+' report.txt; then
+            echo "::error::Scripts produced ORA-/SP2- errors (see lines above)"
+            exit 1
+          fi
+          echo "No ORA-/SP2- errors found"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stats-report
+          path: report.txt
+          if-no-files-found: ignore

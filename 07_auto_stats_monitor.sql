@@ -86,6 +86,10 @@ PROMPT =========================================================================
 PROMPT  CURRENT WINDOW STATUS
 PROMPT ============================================================================
 
+COLUMN next_start FORMAT A19 HEADING "Next Start"
+COLUMN last_start FORMAT A19 HEADING "Last Start"
+COLUMN active     FORMAT A6  HEADING "Active"
+
 SELECT
     window_name,
     TO_CHAR(next_start_date, 'YYYY-MM-DD HH24:MI:SS') AS next_start,
@@ -105,10 +109,6 @@ WHERE
 ORDER BY
     next_start_date;
 
-COLUMN next_start FORMAT A19 HEADING "Next Start"
-COLUMN last_start FORMAT A19 HEADING "Last Start"
-COLUMN active     FORMAT A6  HEADING "Active"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  RECENT AUTO STATS TASK HISTORY (Last 7 Days)
@@ -117,15 +117,19 @@ PROMPT =========================================================================
 COLUMN task_name          FORMAT A35        HEADING "Task Name"
 COLUMN window_start       FORMAT A19        HEADING "Window Start"
 COLUMN window_end         FORMAT A19        HEADING "Window End"
-COLUMN job_status         FORMAT A12        HEADING "Status"
-COLUMN job_duration_mins  FORMAT 9999.9     HEADING "Mins"
+COLUMN jobs_created       FORMAT 9999       HEADING "Created"
+COLUMN jobs_started       FORMAT 9999       HEADING "Started"
+COLUMN jobs_completed     FORMAT 9999       HEADING "Done"
+COLUMN window_duration_mins FORMAT 9999.9   HEADING "Mins"
 
 SELECT
     h.client_name AS task_name,
     TO_CHAR(h.window_start_time, 'YYYY-MM-DD HH24:MI:SS') AS window_start,
     TO_CHAR(h.window_end_time, 'YYYY-MM-DD HH24:MI:SS') AS window_end,
-    h.job_status,
-    ROUND((h.window_end_time - h.window_start_time) * 24 * 60, 1) AS job_duration_mins
+    h.jobs_created,
+    h.jobs_started,
+    h.jobs_completed,
+    ROUND((CAST(h.window_end_time AS DATE) - CAST(h.window_start_time AS DATE)) * 24 * 60, 1) AS window_duration_mins
 FROM
     dba_autotask_client_history h
 WHERE
@@ -138,6 +142,14 @@ PROMPT
 PROMPT ============================================================================
 PROMPT  RUNNING STATISTICS OPERATIONS
 PROMPT ============================================================================
+
+COLUMN sid           FORMAT 99999  HEADING "SID"
+COLUMN serial#       FORMAT 99999  HEADING "Serial#"
+COLUMN username      FORMAT A20    HEADING "Username"
+COLUMN module        FORMAT A25    HEADING "Module"
+COLUMN action        FORMAT A25    HEADING "Action"
+COLUMN started       FORMAT A19    HEADING "Started"
+COLUMN running_mins  FORMAT 9999.9 HEADING "Running Mins"
 
 SELECT
     sid,
@@ -155,18 +167,15 @@ WHERE
 ORDER BY
     sql_exec_start;
 
-COLUMN sid           FORMAT 99999  HEADING "SID"
-COLUMN serial#       FORMAT 99999  HEADING "Serial#"
-COLUMN username      FORMAT A20    HEADING "Username"
-COLUMN module        FORMAT A25    HEADING "Module"
-COLUMN action        FORMAT A25    HEADING "Action"
-COLUMN started       FORMAT A19    HEADING "Started"
-COLUMN running_mins  FORMAT 9999.9 HEADING "Running Mins"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  AUTO OPTIMIZER STATS ADVISOR FINDINGS (if available)
 PROMPT ============================================================================
+
+COLUMN task_name       FORMAT A30 HEADING "Task Name"
+COLUMN execution_name  FORMAT A25 HEADING "Execution"
+COLUMN exec_start      FORMAT A16 HEADING "Execution Start"
+COLUMN findings_count  FORMAT 999 HEADING "Findings"
 
 SELECT
     task_name,
@@ -192,40 +201,42 @@ FROM
         e.execution_start DESC)
 WHERE ROWNUM <= 10;
 
-COLUMN task_name       FORMAT A30 HEADING "Task Name"
-COLUMN execution_name  FORMAT A25 HEADING "Execution"
-COLUMN exec_start      FORMAT A16 HEADING "Execution Start"
-COLUMN findings_count  FORMAT 999 HEADING "Findings"
-
 PROMPT
 PROMPT ============================================================================
-PROMPT  RESOURCE CONSUMPTION BY AUTO STATS
+PROMPT  AUTO STATS SCHEDULER JOB RUNS (Last 7 Days)
 PROMPT ============================================================================
 
-SELECT
-    TO_CHAR(begin_time, 'YYYY-MM-DD HH24') AS hour,
-    ROUND(SUM(cpu_consumed) / 1000000, 2) AS cpu_secs,
-    ROUND(SUM(io_megabytes), 2) AS io_mb
-FROM
-    dba_autotask_job_history
-WHERE
-    client_name LIKE '%stats%'
-    AND begin_time > SYSDATE - 7
-GROUP BY
-    TO_CHAR(begin_time, 'YYYY-MM-DD HH24')
-ORDER BY
-    hour DESC
-FETCH FIRST 24 ROWS ONLY;
+COLUMN log_time      FORMAT A19    HEADING "Log Time"
+COLUMN job_name      FORMAT A30    HEADING "Job Name"
+COLUMN job_status    FORMAT A12    HEADING "Status"
+COLUMN run_mins      FORMAT 9999.9 HEADING "Run Mins"
+COLUMN cpu_mins      FORMAT 9999.9 HEADING "CPU Mins"
 
-COLUMN hour     FORMAT A13    HEADING "Hour"
-COLUMN cpu_secs FORMAT 99999.99 HEADING "CPU (secs)"
-COLUMN io_mb    FORMAT 999999.99 HEADING "IO (MB)"
+SELECT
+    TO_CHAR(CAST(d.log_date AS DATE), 'YYYY-MM-DD HH24:MI:SS') AS log_time,
+    d.job_name,
+    d.status AS job_status,
+    ROUND(EXTRACT(DAY FROM d.run_duration) * 1440
+        + EXTRACT(HOUR FROM d.run_duration) * 60
+        + EXTRACT(MINUTE FROM d.run_duration)
+        + EXTRACT(SECOND FROM d.run_duration) / 60, 1) AS run_mins,
+    ROUND(EXTRACT(DAY FROM d.cpu_used) * 1440
+        + EXTRACT(HOUR FROM d.cpu_used) * 60
+        + EXTRACT(MINUTE FROM d.cpu_used)
+        + EXTRACT(SECOND FROM d.cpu_used) / 60, 1) AS cpu_mins
+FROM
+    dba_scheduler_job_run_details d
+WHERE
+    d.job_name LIKE 'ORA$AT_OS_OPT%'
+    AND d.log_date > SYSTIMESTAMP - INTERVAL '7' DAY
+ORDER BY
+    d.log_date DESC;
 
 PROMPT
 PROMPT Notes:
 PROMPT   - Auto stats runs during maintenance windows (typically nights/weekends)
-PROMPT   - Job status SUCCEEDED means window completed normally
-PROMPT   - Job status STOPPED means window was manually stopped or ran out of time
+PROMPT   - Jobs Created vs Done shows whether the window finished its workload
+PROMPT   - Scheduler job status STOPPED means the run was stopped or timed out
 PROMPT   - Consider extending window duration if jobs frequently time out
 PROMPT   - Use DBMS_AUTO_TASK_ADMIN to enable/disable auto stats
 PROMPT

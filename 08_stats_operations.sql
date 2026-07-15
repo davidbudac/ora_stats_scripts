@@ -6,6 +6,9 @@
 -- Usage: @08_stats_operations.sql
 -- Parameters: Schema name (optional, % for all), Days back (default 7)
 -- Requires: DBA privileges
+-- Notes: START_TIME/END_TIME in DBA_OPTSTAT_OPERATIONS are TIMESTAMP WITH
+--        TIME ZONE; durations are computed via CAST(... AS DATE) so the
+--        arithmetic yields a NUMBER instead of an INTERVAL.
 -- ============================================================================
 
 @@common_settings.sql
@@ -37,7 +40,7 @@ SELECT
     target,
     TO_CHAR(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
     TO_CHAR(end_time, 'YYYY-MM-DD HH24:MI:SS') AS end_time,
-    ROUND((end_time - start_time) * 24 * 60, 1) AS duration_mins,
+    ROUND((CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60, 1) AS duration_mins,
     status,
     job_name
 FROM
@@ -53,6 +56,14 @@ PROMPT =========================================================================
 PROMPT  OPERATIONS SUMMARY BY TYPE
 PROMPT ============================================================================
 
+COLUMN count       FORMAT 9999 HEADING "Count"
+COLUMN completed   FORMAT 9999 HEADING "OK"
+COLUMN failed      FORMAT 9999 HEADING "Fail"
+COLUMN timed_out   FORMAT 9999 HEADING "T/Out"
+COLUMN in_progress FORMAT 9999 HEADING "Run"
+COLUMN avg_mins    FORMAT 9999.9 HEADING "Avg Min"
+COLUMN max_mins    FORMAT 9999.9 HEADING "Max Min"
+
 SELECT
     operation,
     COUNT(*) AS count,
@@ -60,8 +71,8 @@ SELECT
     SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed,
     SUM(CASE WHEN status = 'TIMED OUT' THEN 1 ELSE 0 END) AS timed_out,
     SUM(CASE WHEN status = 'IN PROGRESS' THEN 1 ELSE 0 END) AS in_progress,
-    ROUND(AVG((end_time - start_time) * 24 * 60), 1) AS avg_mins,
-    ROUND(MAX((end_time - start_time) * 24 * 60), 1) AS max_mins
+    ROUND(AVG((CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60), 1) AS avg_mins,
+    ROUND(MAX((CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60), 1) AS max_mins
 FROM
     dba_optstat_operations
 WHERE
@@ -72,25 +83,20 @@ GROUP BY
 ORDER BY
     count DESC;
 
-COLUMN count       FORMAT 9999 HEADING "Count"
-COLUMN completed   FORMAT 9999 HEADING "OK"
-COLUMN failed      FORMAT 9999 HEADING "Fail"
-COLUMN timed_out   FORMAT 9999 HEADING "T/Out"
-COLUMN in_progress FORMAT 9999 HEADING "Run"
-COLUMN avg_mins    FORMAT 9999.9 HEADING "Avg Min"
-COLUMN max_mins    FORMAT 9999.9 HEADING "Max Min"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  FAILED OPERATIONS
 PROMPT ============================================================================
+
+COLUMN notes FORMAT A60 HEADING "Notes"
 
 SELECT
     operation,
     target,
     TO_CHAR(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
     status,
-    job_name
+    job_name,
+    SUBSTR(notes, 1, 60) AS notes
 FROM
     dba_optstat_operations
 WHERE
@@ -109,28 +115,32 @@ SELECT
     operation,
     target,
     TO_CHAR(start_time, 'YYYY-MM-DD HH24:MI:SS') AS start_time,
-    ROUND((end_time - start_time) * 24 * 60, 1) AS duration_mins,
+    ROUND((CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60, 1) AS duration_mins,
     status
 FROM
     dba_optstat_operations
 WHERE
     start_time > SYSDATE - &days_back
-    AND (end_time - start_time) * 24 * 60 > 30
+    AND (CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60 > 30
     AND (target LIKE UPPER('&schema_name') || '.%' OR '&schema_name' = '%')
 ORDER BY
-    (end_time - start_time) DESC;
+    duration_mins DESC;
 
 PROMPT
 PROMPT ============================================================================
 PROMPT  DAILY OPERATIONS VOLUME
 PROMPT ============================================================================
 
+COLUMN day        FORMAT A10   HEADING "Day"
+COLUMN total_ops  FORMAT 9999  HEADING "Total Ops"
+COLUMN total_mins FORMAT 99999 HEADING "Total Min"
+
 SELECT
     TO_CHAR(start_time, 'YYYY-MM-DD') AS day,
     COUNT(*) AS total_ops,
     SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
     SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) AS failed,
-    ROUND(SUM((end_time - start_time) * 24 * 60), 0) AS total_mins
+    ROUND(SUM((CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60), 0) AS total_mins
 FROM
     dba_optstat_operations
 WHERE
@@ -141,21 +151,21 @@ GROUP BY
 ORDER BY
     day DESC;
 
-COLUMN day        FORMAT A10   HEADING "Day"
-COLUMN total_ops  FORMAT 9999  HEADING "Total Ops"
-COLUMN total_mins FORMAT 99999 HEADING "Total Min"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  TABLES WITH MOST FREQUENT STATS GATHERING
 PROMPT ============================================================================
+
+COLUMN gather_count FORMAT 9999 HEADING "Count"
+COLUMN first_gather FORMAT A16  HEADING "First Gather"
+COLUMN last_gather  FORMAT A16  HEADING "Last Gather"
 
 SELECT
     target AS table_name,
     COUNT(*) AS gather_count,
     MIN(TO_CHAR(start_time, 'YYYY-MM-DD HH24:MI')) AS first_gather,
     MAX(TO_CHAR(start_time, 'YYYY-MM-DD HH24:MI')) AS last_gather,
-    ROUND(AVG((end_time - start_time) * 24 * 60), 1) AS avg_mins
+    ROUND(AVG((CAST(end_time AS DATE) - CAST(start_time AS DATE)) * 24 * 60), 1) AS avg_mins
 FROM
     dba_optstat_operations
 WHERE
@@ -170,10 +180,6 @@ ORDER BY
     gather_count DESC
 FETCH FIRST 20 ROWS ONLY;
 
-COLUMN gather_count FORMAT 9999 HEADING "Count"
-COLUMN first_gather FORMAT A16  HEADING "First Gather"
-COLUMN last_gather  FORMAT A16  HEADING "Last Gather"
-
 PROMPT
 PROMPT Operation Types:
 PROMPT   gather_table_stats    - Single table gather
@@ -183,6 +189,9 @@ PROMPT   delete_table_stats    - Statistics deletion
 PROMPT   set_table_stats       - Manual stats setting
 PROMPT   restore_table_stats   - Stats restoration from history
 PROMPT
+
+UNDEFINE schema_name
+UNDEFINE days_back
 
 SET FEEDBACK ON
 SET VERIFY ON

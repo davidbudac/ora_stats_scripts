@@ -69,7 +69,12 @@ WHERE
     t.owner = UPPER('&schema_name')
     AND t.temporary = 'N'
     AND t.secondary = 'N'
+    AND t.nested = 'NO'
     AND (t.iot_type IS NULL OR t.iot_type = 'IOT')
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    )
 ORDER BY
     CASE
         WHEN ts.num_rows IS NULL THEN 1
@@ -83,6 +88,13 @@ PROMPT
 PROMPT ============================================================================
 PROMPT  SUMMARY
 PROMPT ============================================================================
+
+COLUMN total_tables  FORMAT 9999 HEADING "Total|Tables"
+COLUMN no_stats      FORMAT 9999 HEADING "No|Stats"
+COLUMN stale_stats   FORMAT 9999 HEADING "Stale|Stats"
+COLUMN old_stats     FORMAT 9999 HEADING "Old|Stats"
+COLUMN low_sample    FORMAT 9999 HEADING "Low|Sample"
+COLUMN locked_stats  FORMAT 9999 HEADING "Locked|Stats"
 
 SELECT
     COUNT(*) AS total_tables,
@@ -102,14 +114,12 @@ WHERE
     t.owner = UPPER('&schema_name')
     AND t.temporary = 'N'
     AND t.secondary = 'N'
-    AND (t.iot_type IS NULL OR t.iot_type = 'IOT');
-
-COLUMN total_tables  FORMAT 9999 HEADING "Total|Tables"
-COLUMN no_stats      FORMAT 9999 HEADING "No|Stats"
-COLUMN stale_stats   FORMAT 9999 HEADING "Stale|Stats"
-COLUMN old_stats     FORMAT 9999 HEADING "Old|Stats"
-COLUMN low_sample    FORMAT 9999 HEADING "Low|Sample"
-COLUMN locked_stats  FORMAT 9999 HEADING "Locked|Stats"
+    AND t.nested = 'NO'
+    AND (t.iot_type IS NULL OR t.iot_type = 'IOT')
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    );
 
 PROMPT
 PROMPT Issue Legend:
@@ -118,6 +128,10 @@ PROMPT   STALE      - Statistics marked as stale by Oracle
 PROMPT   OLD (>30d) - Statistics older than 30 days
 PROMPT   LOW SAMPLE - Sample size less than 10% of rows
 PROMPT
+PROMPT Note: Temporary, secondary, nested, and external tables are excluded.
+PROMPT
+
+UNDEFINE schema_name
 
 SET FEEDBACK ON
 SET VERIFY ON

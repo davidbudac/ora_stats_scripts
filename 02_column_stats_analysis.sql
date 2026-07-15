@@ -5,7 +5,10 @@
 -- ============================================================================
 -- Usage: @02_column_stats_analysis.sql
 -- Parameters: Schema name (prompted), Table name (optional)
--- Requires: DBA privileges
+-- Requires: DBA privileges (including SELECT on SYS.COL_USAGE$ via
+--           SELECT ANY DICTIONARY, granted with the DBA role)
+-- Notes: Uses a WITH FUNCTION clause (requires 12c+ and SQL*Plus 12c+) to
+--        decode LOW_VALUE/HIGH_VALUE with DBMS_STATS.CONVERT_RAW_VALUE.
 -- ============================================================================
 
 @@common_settings.sql
@@ -17,7 +20,7 @@ PROMPT =========================================================================
 PROMPT
 
 ACCEPT schema_name CHAR PROMPT 'Enter schema name: '
-ACCEPT table_name CHAR PROMPT 'Enter table name (or % for all): '
+ACCEPT table_name CHAR DEFAULT '%' PROMPT 'Enter table name [%]: '
 
 COLUMN table_name         FORMAT A25        HEADING "Table"
 COLUMN column_name        FORMAT A25        HEADING "Column"
@@ -30,12 +33,53 @@ COLUMN histogram          FORMAT A15             HEADING "Histogram"
 COLUMN num_buckets        FORMAT 9999            HEADING "Bkts"
 COLUMN low_value_d        FORMAT A20             HEADING "Low Value"
 COLUMN high_value_d       FORMAT A20             HEADING "High Value"
+COLUMN used_in_preds      FORMAT A4              HEADING "Used"
 COLUMN issues             FORMAT A20             HEADING "Issues"
 
 PROMPT
 PROMPT Column Statistics for: &schema_name..&table_name
 PROMPT ============================================================================
 
+WITH
+    FUNCTION decode_raw(p_raw IN RAW, p_data_type IN VARCHAR2)
+        RETURN VARCHAR2
+    IS
+        v_number   NUMBER;
+        v_varchar2 VARCHAR2(4000);
+        v_nvarchar NVARCHAR2(2000);
+        v_date     DATE;
+        v_bfloat   BINARY_FLOAT;
+        v_bdouble  BINARY_DOUBLE;
+    BEGIN
+        IF p_raw IS NULL THEN
+            RETURN NULL;
+        END IF;
+        CASE
+            WHEN p_data_type IN ('NUMBER', 'FLOAT') THEN
+                DBMS_STATS.CONVERT_RAW_VALUE(p_raw, v_number);
+                RETURN SUBSTR(TO_CHAR(v_number), 1, 20);
+            WHEN p_data_type = 'BINARY_FLOAT' THEN
+                DBMS_STATS.CONVERT_RAW_VALUE(p_raw, v_bfloat);
+                RETURN SUBSTR(TO_CHAR(v_bfloat), 1, 20);
+            WHEN p_data_type = 'BINARY_DOUBLE' THEN
+                DBMS_STATS.CONVERT_RAW_VALUE(p_raw, v_bdouble);
+                RETURN SUBSTR(TO_CHAR(v_bdouble), 1, 20);
+            WHEN p_data_type IN ('VARCHAR2', 'CHAR') THEN
+                DBMS_STATS.CONVERT_RAW_VALUE(p_raw, v_varchar2);
+                RETURN SUBSTR(v_varchar2, 1, 20);
+            WHEN p_data_type IN ('NVARCHAR2', 'NCHAR') THEN
+                DBMS_STATS.CONVERT_RAW_VALUE_NVARCHAR(p_raw, v_nvarchar);
+                RETURN SUBSTR(TO_CHAR(v_nvarchar), 1, 20);
+            WHEN p_data_type = 'DATE' OR p_data_type LIKE 'TIMESTAMP%' THEN
+                DBMS_STATS.CONVERT_RAW_VALUE(p_raw, v_date);
+                RETURN TO_CHAR(v_date, 'YYYY-MM-DD HH24:MI:SS');
+            ELSE
+                RETURN SUBSTR(RAWTOHEX(p_raw), 1, 20);
+        END CASE;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RETURN '?';
+    END;
 SELECT
     c.table_name,
     c.column_name,
@@ -46,64 +90,61 @@ SELECT
     cs.density,
     cs.histogram,
     cs.num_buckets,
+    decode_raw(cs.low_value, c.data_type)  AS low_value_d,
+    decode_raw(cs.high_value, c.data_type) AS high_value_d,
     CASE
-        WHEN c.data_type IN ('NUMBER', 'FLOAT', 'BINARY_FLOAT', 'BINARY_DOUBLE') THEN
-            SUBSTR(TO_CHAR(UTL_RAW.CAST_TO_NUMBER(cs.low_value)), 1, 20)
-        WHEN c.data_type IN ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'NCHAR') THEN
-            SUBSTR(UTL_RAW.CAST_TO_VARCHAR2(cs.low_value), 1, 20)
-        WHEN c.data_type = 'DATE' THEN
-            TO_CHAR(TO_DATE(TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.low_value,1,2))-100,'FM00')
-                ||TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.low_value,3,2))-100,'FM00')
-                ||TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.low_value,5,2)),'FM00')
-                ||TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.low_value,7,2)),'FM00'),
-                'YYYYMMDD'), 'YYYY-MM-DD')
-        ELSE '...'
-    END AS low_value_d,
-    CASE
-        WHEN c.data_type IN ('NUMBER', 'FLOAT', 'BINARY_FLOAT', 'BINARY_DOUBLE') THEN
-            SUBSTR(TO_CHAR(UTL_RAW.CAST_TO_NUMBER(cs.high_value)), 1, 20)
-        WHEN c.data_type IN ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'NCHAR') THEN
-            SUBSTR(UTL_RAW.CAST_TO_VARCHAR2(cs.high_value), 1, 20)
-        WHEN c.data_type = 'DATE' THEN
-            TO_CHAR(TO_DATE(TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.high_value,1,2))-100,'FM00')
-                ||TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.high_value,3,2))-100,'FM00')
-                ||TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.high_value,5,2)),'FM00')
-                ||TO_CHAR(UTL_RAW.CAST_TO_NUMBER(SUBSTR(cs.high_value,7,2)),'FM00'),
-                'YYYYMMDD'), 'YYYY-MM-DD')
-        ELSE '...'
-    END AS high_value_d,
+        WHEN u.equality_preds > 0 OR u.equijoin_preds > 0
+             OR u.range_preds > 0 OR u.like_preds > 0 THEN 'YES'
+        ELSE 'NO'
+    END AS used_in_preds,
     CASE
         WHEN cs.num_distinct IS NULL THEN 'NO STATS'
-        WHEN cs.histogram = 'NONE' AND cs.num_distinct < 254
-             AND cs.num_distinct > 1 THEN 'NEEDS HIST?'
+        WHEN cs.histogram = 'NONE'
+             AND cs.num_distinct < 254
+             AND cs.num_distinct > 1
+             AND (u.equality_preds > 0 OR u.equijoin_preds > 0
+                  OR u.range_preds > 0 OR u.like_preds > 0) THEN 'NEEDS HIST?'
         WHEN cs.num_buckets > 254 THEN 'MANY BUCKETS'
         ELSE NULL
     END AS issues
 FROM
-    dba_tab_columns c
+    dba_tab_cols c
     LEFT JOIN dba_tab_col_statistics cs
         ON c.owner = cs.owner
         AND c.table_name = cs.table_name
         AND c.column_name = cs.column_name
+    LEFT JOIN dba_objects ob
+        ON ob.owner = c.owner
+        AND ob.object_name = c.table_name
+        AND ob.object_type = 'TABLE'
+    LEFT JOIN sys.col_usage$ u
+        ON u.obj# = ob.object_id
+        AND u.intcol# = c.internal_column_id
 WHERE
     c.owner = UPPER('&schema_name')
     AND c.table_name LIKE UPPER('&table_name')
+    AND c.hidden_column = 'NO'
     AND c.virtual_column = 'NO'
 ORDER BY
     c.table_name,
-    c.column_id;
+    c.column_id
+/
 
 PROMPT
 PROMPT ============================================================================
 PROMPT  HISTOGRAM DISTRIBUTION SUMMARY
 PROMPT ============================================================================
 
+COLUMN histogram     FORMAT A15  HEADING "Histogram Type"
+COLUMN column_count  FORMAT 9999 HEADING "Columns"
+COLUMN pct           FORMAT 990.9 HEADING "Pct%"
+
 SELECT
     cs.histogram,
     COUNT(*) AS column_count,
     ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) AS pct
 FROM
-    dba_tab_columns c
+    dba_tab_cols c
     LEFT JOIN dba_tab_col_statistics cs
         ON c.owner = cs.owner
         AND c.table_name = cs.table_name
@@ -111,15 +152,12 @@ FROM
 WHERE
     c.owner = UPPER('&schema_name')
     AND c.table_name LIKE UPPER('&table_name')
+    AND c.hidden_column = 'NO'
     AND c.virtual_column = 'NO'
 GROUP BY
     cs.histogram
 ORDER BY
     column_count DESC;
-
-COLUMN histogram     FORMAT A15  HEADING "Histogram Type"
-COLUMN column_count  FORMAT 9999 HEADING "Columns"
-COLUMN pct           FORMAT 990.9 HEADING "Pct%"
 
 PROMPT
 PROMPT ============================================================================
@@ -132,7 +170,7 @@ SELECT
     c.data_type,
     c.nullable
 FROM
-    dba_tab_columns c
+    dba_tab_cols c
     LEFT JOIN dba_tab_col_statistics cs
         ON c.owner = cs.owner
         AND c.table_name = cs.table_name
@@ -140,6 +178,7 @@ FROM
 WHERE
     c.owner = UPPER('&schema_name')
     AND c.table_name LIKE UPPER('&table_name')
+    AND c.hidden_column = 'NO'
     AND c.virtual_column = 'NO'
     AND cs.num_distinct IS NULL
 ORDER BY
@@ -156,9 +195,19 @@ PROMPT   HEIGHT BALANCED - Legacy histogram type (pre-12c)
 PROMPT
 PROMPT Issue Legend:
 PROMPT   NO STATS     - Column has no statistics
-PROMPT   NEEDS HIST?  - Low NDV column without histogram (consider FOR COLUMNS)
+PROMPT   NEEDS HIST?  - Low NDV column used in predicates but without histogram
 PROMPT   MANY BUCKETS - More than 254 buckets (unusual)
 PROMPT
+PROMPT Notes:
+PROMPT   - "Used" shows whether the column has appeared in WHERE-clause predicates
+PROMPT     (from SYS.COL_USAGE$); METHOD_OPT SIZE AUTO only creates histograms
+PROMPT     for columns with recorded usage.
+PROMPT   - For a per-table usage report run:
+PROMPT       SELECT DBMS_STATS.REPORT_COL_USAGE('&schema_name', 'TABLE_NAME') FROM dual;
+PROMPT
+
+UNDEFINE schema_name
+UNDEFINE table_name
 
 SET FEEDBACK ON
 SET VERIFY ON

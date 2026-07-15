@@ -35,7 +35,7 @@ SELECT
     'INFO' AS status
 FROM dba_tables
 WHERE owner = UPPER('&schema_name')
-AND temporary = 'N' AND secondary = 'N'
+AND temporary = 'N' AND secondary = 'N' AND nested = 'NO'
 UNION ALL
 SELECT
     'Tables Without Statistics',
@@ -45,7 +45,11 @@ FROM dba_tables t
 LEFT JOIN dba_tab_statistics ts
     ON t.owner = ts.owner AND t.table_name = ts.table_name AND ts.partition_name IS NULL
 WHERE t.owner = UPPER('&schema_name')
-AND t.temporary = 'N' AND t.secondary = 'N'
+AND t.temporary = 'N' AND t.secondary = 'N' AND t.nested = 'NO'
+AND NOT EXISTS (
+    SELECT 1 FROM dba_external_tables x
+    WHERE x.owner = t.owner AND x.table_name = t.table_name
+)
 AND ts.num_rows IS NULL
 UNION ALL
 SELECT
@@ -289,9 +293,6 @@ FROM (
     SELECT 'INCREMENTAL', DBMS_STATS.GET_PREFS('INCREMENTAL') FROM dual
 );
 
-COLUMN preference_name  FORMAT A25 HEADING "Preference"
-COLUMN preference_value FORMAT A35 HEADING "Value"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  9. RECOMMENDATIONS
@@ -311,7 +312,11 @@ BEGIN
     LEFT JOIN dba_tab_statistics ts
         ON t.owner = ts.owner AND t.table_name = ts.table_name AND ts.partition_name IS NULL
     WHERE t.owner = UPPER('&schema_name')
-    AND t.temporary = 'N' AND t.secondary = 'N'
+    AND t.temporary = 'N' AND t.secondary = 'N' AND t.nested = 'NO'
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    )
     AND ts.num_rows IS NULL;
 
     IF v_count > 0 THEN
@@ -403,6 +408,8 @@ PROMPT   OK      - No issues detected
 PROMPT   INFO    - Informational, may warrant review
 PROMPT   WARNING - Action recommended
 PROMPT
+
+UNDEFINE schema_name
 
 SET SERVEROUTPUT OFF
 SET FEEDBACK ON

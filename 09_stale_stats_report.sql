@@ -18,6 +18,10 @@ PROMPT
 
 ACCEPT schema_name CHAR PROMPT 'Enter schema name: '
 
+PROMPT
+PROMPT Flushing database monitoring info so DBA_TAB_MODIFICATIONS is current...
+EXEC DBMS_STATS.FLUSH_DATABASE_MONITORING_INFO;
+
 COLUMN table_name         FORMAT A30        HEADING "Table Name"
 COLUMN num_rows           FORMAT 999,999,999,999 HEADING "Num Rows"
 COLUMN last_analyzed      FORMAT A19        HEADING "Last Analyzed"
@@ -86,6 +90,8 @@ PROMPT =========================================================================
 PROMPT
 PROMPT Tables with significant modifications (> 10% or > 100K rows):
 
+COLUMN days_old FORMAT 9999 HEADING "Days"
+
 SELECT
     ts.table_name,
     ts.num_rows,
@@ -116,12 +122,14 @@ WHERE
 ORDER BY
     NVL(tm.inserts, 0) + NVL(tm.updates, 0) + NVL(tm.deletes, 0) DESC;
 
-COLUMN days_old FORMAT 9999 HEADING "Days"
-
 PROMPT
 PROMPT ============================================================================
 PROMPT  TABLES WITHOUT STATISTICS
 PROMPT ============================================================================
+
+COLUMN actual_rows FORMAT 999,999,999,999 HEADING "Actual Rows"
+COLUMN partitioned FORMAT A4              HEADING "Part"
+COLUMN table_analyzed FORMAT A19          HEADING "Table Analyzed"
 
 SELECT
     t.table_name,
@@ -139,19 +147,26 @@ WHERE
     t.owner = UPPER('&schema_name')
     AND t.temporary = 'N'
     AND t.secondary = 'N'
+    AND t.nested = 'NO'
     AND (t.iot_type IS NULL OR t.iot_type = 'IOT')
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    )
     AND ts.num_rows IS NULL
 ORDER BY
     t.blocks DESC NULLS LAST;
-
-COLUMN actual_rows FORMAT 999,999,999,999 HEADING "Actual Rows"
-COLUMN partitioned FORMAT A4              HEADING "Part"
-COLUMN table_analyzed FORMAT A19          HEADING "Table Analyzed"
 
 PROMPT
 PROMPT ============================================================================
 PROMPT  STALE STATISTICS SUMMARY
 PROMPT ============================================================================
+
+COLUMN total_tables  FORMAT 9999 HEADING "Total"
+COLUMN stale_tables  FORMAT 9999 HEADING "Stale"
+COLUMN no_stats      FORMAT 9999 HEADING "No Stats"
+COLUMN truncated     FORMAT 9999 HEADING "Truncated"
+COLUMN high_churn    FORMAT 9999 HEADING "High Churn"
 
 SELECT
     COUNT(*) AS total_tables,
@@ -176,13 +191,13 @@ WHERE
     ts.owner = UPPER('&schema_name')
     AND ts.object_type = 'TABLE'
     AND ts.partition_name IS NULL
-    AND t.temporary = 'N';
-
-COLUMN total_tables  FORMAT 9999 HEADING "Total"
-COLUMN stale_tables  FORMAT 9999 HEADING "Stale"
-COLUMN no_stats      FORMAT 9999 HEADING "No Stats"
-COLUMN truncated     FORMAT 9999 HEADING "Truncated"
-COLUMN high_churn    FORMAT 9999 HEADING "High Churn"
+    AND t.temporary = 'N'
+    AND t.secondary = 'N'
+    AND t.nested = 'NO'
+    AND NOT EXISTS (
+        SELECT 1 FROM dba_external_tables x
+        WHERE x.owner = t.owner AND x.table_name = t.table_name
+    );
 
 PROMPT
 PROMPT ============================================================================
@@ -204,6 +219,11 @@ PROMPT   HIGH     - No stats or >50% data modified
 PROMPT   MEDIUM   - Marked stale by Oracle
 PROMPT   LOW      - Minor changes
 PROMPT
+PROMPT Note: DBMS_STATS.FLUSH_DATABASE_MONITORING_INFO was executed at the start
+PROMPT       of this report so DML counts reflect current in-memory activity.
+PROMPT
+
+UNDEFINE schema_name
 
 SET FEEDBACK ON
 SET VERIFY ON
